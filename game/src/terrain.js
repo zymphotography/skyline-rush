@@ -90,26 +90,66 @@ export function buildWorld(mission) {
     heading: 0,
   };
 
-  // Trees dot the valleys, never on either strip or under a ring.
+  // Trees dot the valleys, never on either strip or under a ring. Most grow
+  // in forest clumps; a few stand alone. A tree carries a shade value so
+  // the canopy reads in two greens.
   const trees = [];
-  for (let i = 0; i < 240; i += 1) {
+  const nearStrip = (x, z) =>
+    (Math.abs(x - runwayX) < 40 && z > runway.z0 - 380 && z < runway.z1 + 80) ||
+    (Math.abs(x) < 40 && z > -140 && z < 440);
+  const underRing = (x, z) => rings.some((r) => Math.hypot(x - r.x, z - r.z) < 70);
+  for (let c = 0; c < 11; c += 1) {
+    const cx = range(random, -650, 650);
+    const cz = range(random, 150, runwayZ + 400);
+    const count = Math.floor(range(random, 10, 20));
+    const spread = range(random, 45, 95);
+    for (let i = 0; i < count; i += 1) {
+      const x = cx + range(random, -spread, spread);
+      const z = cz + range(random, -spread, spread);
+      if (nearStrip(x, z) || underRing(x, z)) continue;
+      trees.push({ x, y: heightAt(x, z), z, size: range(random, 7, 14), shade: random() });
+    }
+  }
+  for (let i = 0; i < 70; i += 1) {
     const x = range(random, -700, 700);
     const z = range(random, 150, runwayZ + 500);
-    if (Math.abs(x - runwayX) < 40 && z > runway.z0 - 380 && z < runway.z1 + 80) continue;
-    if (Math.abs(x) < 40 && z > -140 && z < 440) continue;
+    if (nearStrip(x, z) || underRing(x, z)) continue;
     const y = heightAt(x, z);
-    trees.push({ x, y, z, size: range(random, 7, 13) });
+    trees.push({ x, y, z, size: range(random, 7, 13), shade: random() });
+  }
+
+  // Lakes: still water away from the course and both strips, so the ground
+  // has blue to break the green and brown.
+  const lakes = [];
+  for (let i = 0; i < 12 && lakes.length < 3; i += 1) {
+    const side = random() < 0.5 ? -1 : 1;
+    const x = side * range(random, 380, 620);
+    const z = range(random, 350, runwayZ - 100);
+    if (Math.abs(x - runwayX) < 160 && z > runway.z0 - 400 && z < runway.z1 + 100) continue;
+    if (rings.some((r) => Math.hypot(x - r.x, z - r.z) < 150)) continue;
+    lakes.push({ x, z, rx: range(random, 70, 150), rz: range(random, 45, 95) });
   }
 
   // Clouds drift above the course, high enough to fly under, low enough to
   // read as weather rather than wallpaper.
   const clouds = [];
-  for (let i = 0; i < 26; i += 1) {
+  for (let i = 0; i < 34; i += 1) {
     clouds.push({
       x: range(random, -900, 900),
       y: range(random, 330, 520),
       z: range(random, 200, runwayZ + 800),
       size: range(random, 60, 170),
+    });
+  }
+
+  // High cirrus streaks, thin and far above the course.
+  const cirrus = [];
+  for (let i = 0; i < 9; i += 1) {
+    cirrus.push({
+      x: range(random, -1200, 1200),
+      y: range(random, 560, 700),
+      z: range(random, 400, runwayZ + 1200),
+      size: range(random, 180, 380),
     });
   }
 
@@ -122,6 +162,8 @@ export function buildWorld(mission) {
     startStrip,
     trees,
     clouds,
+    cirrus,
+    lakes,
     courseEnd: runwayZ + mission.runwayLength,
   };
 }

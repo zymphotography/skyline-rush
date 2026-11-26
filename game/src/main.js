@@ -166,7 +166,8 @@ fitCanvas();
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
 if (shot) {
-  const staged = stageShot(shot, sim);
+  const missionIndex = Math.max(0, Math.min(2, Number(params.get('mission') ?? 0) || 0));
+  const staged = stageShot(shot, sim, missionIndex);
   time = 12; // a midday sun angle for the staged frames
   const scale = Math.min(canvas.width / FIELD.width, canvas.height / FIELD.height);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);

@@ -85,20 +85,29 @@ function rgbString(rgb) {
   return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
 }
 
-/** The ground's colour at one place: height picks the band, the river cuts a blue line, distance hazes it toward the sky. Returns [r, g, b]. */
+/** The ground's colour at one place: height picks the band, farmland patches
+ * break the valleys into fields, and distance hazes it toward the sky.
+ * Returns [r, g, b]. */
 function groundColour(world, palette, x, z, h, distance) {
   const low = hexToRgb(palette.groundLow);
   const mid = hexToRgb(palette.groundMid);
   const high = hexToRgb(palette.groundHigh);
   const snow = hexToRgb(palette.snow);
-  const river = hexToRgb(palette.river);
   const hazeRgb = hexToRgb(palette.haze);
   let base;
   if (h < 30) base = low;
   else if (h < 80) base = mixRgb(low, mid, (h - 30) / 50);
   else if (h < 120) base = mixRgb(mid, high, (h - 80) / 40);
   else base = mixRgb(high, snow, Math.min(1, (h - 120) / 50));
-  if (Math.abs(x - world.riverX(z)) < 18) base = mixRgb(base, river, 0.85);
+  // Farmland patchwork: each 150m cell of valley ground takes one crop
+  // colour, so the valleys read as fields from the air.
+  if (h < 85) {
+    const cell = hash2(Math.floor(x / 150), Math.floor(z / 150));
+    const field = [palette.fieldA, palette.fieldB, palette.fieldC, palette.fieldD][
+      Math.floor(cell * 4)
+    ];
+    base = mixRgb(base, hexToRgb(field), 0.38);
+  }
   const haze = Math.min(0.62, (distance / DRAW_DISTANCE) * 0.9);
   return mixRgb(base, hazeRgb, haze);
 }
@@ -114,8 +123,8 @@ function shadeRgb(rgb, factor) {
 
 // --- the scene ------------------------------------------------------------
 
-const SLICES = 44;
-const SAMPLES = 36;
+const SLICES = 56;
+const SAMPLES = 48;
 
 /** Draw sky, sun, clouds, terrain bands, trees, runway and rings. */
 function drawWorld(ctx, sim, time) {
@@ -138,15 +147,45 @@ function drawWorld(ctx, sim, time) {
   ctx.fillRect(-FIELD.width, -FIELD.height, FIELD.width * 3, FIELD.height * 2);
   const sun = proj.project(plane.x + Math.sin(plane.heading) * 3000, 420, plane.z + Math.cos(plane.heading) * 3000);
   if (sun) {
-    const glow = ctx.createRadialGradient(sun.sx, sun.sy, 4, sun.sx, sun.sy, 130);
+    // Sun rays: a few short, faint wedges around the disc, so the low sun
+    // reads as a dawn or dusk sun instead of a plain dot.
+    ctx.save();
+    ctx.translate(sun.sx, sun.sy);
+    ctx.fillStyle = palette.sunGlow;
+    for (let r = 0; r < 6; r += 1) {
+      const a = (r / 6) * Math.PI * 2 + time * 0.02;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, 115, a - 0.028, a + 0.028);
+      ctx.closePath();
+      ctx.globalAlpha = 0.16;
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    const glow = ctx.createRadialGradient(sun.sx, sun.sy, 4, sun.sx, sun.sy, 150);
     glow.addColorStop(0, palette.sunGlow);
     glow.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = glow;
-    ctx.fillRect(sun.sx - 140, sun.sy - 140, 280, 280);
+    ctx.fillRect(sun.sx - 160, sun.sy - 160, 320, 320);
     ctx.fillStyle = palette.sun;
     ctx.beginPath();
     ctx.arc(sun.sx, sun.sy, 26, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // Stars at dusk, scattered across the dark top of the sky.
+  if (palette.stars > 0) {
+    for (let s = 0; s < 46; s += 1) {
+      const sx = hash2(s, 7) * FIELD.width;
+      const sy = hash2(s, 13) * proj.horizonY * 0.55;
+      const tw = 0.4 + 0.6 * Math.abs(Math.sin(time * 1.5 + s));
+      ctx.fillStyle = `rgba(255,255,255,${(0.5 * palette.stars * tw).toFixed(2)})`;
+      const r = 0.8 + hash2(s, 21) * 1.1;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // Distant ridges: craggy silhouettes that give the horizon its shape. They
@@ -210,7 +249,7 @@ function drawWorld(ctx, sim, time) {
       const d2 = far ? far[j] : { sx: a.sx, sy: bottom };
       if (!far && (!c || !d2)) continue;
       if (far && (!c || !d2)) continue;
-      const bright = 0.99 + hash2(k, j) * 0.02;
+      const bright = 0.995 + hash2(k, j) * 0.01;
       ctx.fillStyle = shadeRgb(groundColour(world, palette, a.wx, a.wz, a.h, a.d), bright);
       ctx.beginPath();
       ctx.moveTo(a.sx, a.sy);
@@ -230,7 +269,7 @@ function drawWorld(ctx, sim, time) {
       const a = nearest[j];
       const b = nearest[j + 1];
       if (!a || !b) continue;
-      const bright = 0.99 + hash2(0, j) * 0.02;
+      const bright = 0.995 + hash2(0, j) * 0.01;
       ctx.fillStyle = shadeRgb(groundColour(world, palette, a.wx, a.wz, a.h, a.d), bright);
       ctx.beginPath();
       ctx.moveTo(a.sx, a.sy);
@@ -242,13 +281,98 @@ function drawWorld(ctx, sim, time) {
     }
   }
 
-  // Clouds, drifting above the course.
+  // The river as one smooth ribbon along its S-curve, instead of the
+  // staircase the ground bands would make of it: project both banks and
+  // fill between them, with a lighter centre current.
+  {
+    const riverPts = [];
+    const zStart = Math.max(0, proj.camZ - 100);
+    const zEnd = proj.camZ + DRAW_DISTANCE;
+    for (let z = zStart; z <= zEnd; z += 55) {
+      const cx = world.riverX(z);
+      const h = groundUnder(world, cx, z) + 0.4;
+      const left = proj.project(cx - 10, h, z);
+      const right = proj.project(cx + 10, h, z);
+      if (left && right) riverPts.push({ left, right, z });
+    }
+    if (riverPts.length > 2) {
+      ctx.fillStyle = palette.river;
+      ctx.beginPath();
+      ctx.moveTo(riverPts[0].left.sx, riverPts[0].left.sy);
+      for (const p of riverPts) ctx.lineTo(p.left.sx, p.left.sy);
+      for (let i = riverPts.length - 1; i >= 0; i -= 1) ctx.lineTo(riverPts[i].right.sx, riverPts[i].right.sy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      ctx.beginPath();
+      let started = false;
+      for (const p of riverPts) {
+        const mx = (p.left.sx + p.right.sx) / 2;
+        const my = (p.left.sy + p.right.sy) / 2;
+        if (!started) {
+          ctx.moveTo(mx - 2, my);
+          started = true;
+        } else ctx.lineTo(mx - 2, my);
+      }
+      for (let i = riverPts.length - 1; i >= 0; i -= 1) {
+        const p = riverPts[i];
+        ctx.lineTo((p.left.sx + p.right.sx) / 2 + 2, (p.left.sy + p.right.sy) / 2);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // Lakes: flat blue ellipses laid over the ground where the world put them.
+  for (const lake of world.lakes ?? []) {
+    const pts = [];
+    for (let a = 0; a < 24; a += 1) {
+      const t = (a / 24) * Math.PI * 2;
+      const wx = lake.x + Math.cos(t) * lake.rx;
+      const wz = lake.z + Math.sin(t) * lake.rz;
+      const p = proj.project(wx, groundUnder(world, wx, wz) + 0.4, wz);
+      if (p) pts.push(p);
+    }
+    if (pts.length > 4) {
+      const haze = Math.min(0.5, (pts[0].fwd / DRAW_DISTANCE) * 0.9);
+      ctx.fillStyle = mixHex(palette.lake, palette.haze, haze);
+      ctx.beginPath();
+      ctx.moveTo(pts[0].sx, pts[0].sy);
+      for (const p of pts) ctx.lineTo(p.sx, p.sy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  // High cirrus streaks: thin, wide, far above the course.
+  for (const streak of world.cirrus ?? []) {
+    const p = proj.project(streak.x, streak.y, streak.z);
+    if (!p || p.fwd > DRAW_DISTANCE) continue;
+    const r = streak.size * p.scale;
+    if (r < 4) continue;
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(p.sx, p.sy, r, Math.max(2, r * 0.07), 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Clouds, drifting above the course: a shaded underside, then white puffs
+  // on top, so they read as solid weather instead of flat cut-outs.
   for (const cloud of world.clouds) {
     const p = proj.project(cloud.x, cloud.y, cloud.z);
     if (!p || p.fwd > DRAW_DISTANCE) continue;
     const r = cloud.size * p.scale;
     if (r < 2) continue;
-    ctx.fillStyle = 'rgba(255,255,255,0.65)';
+    ctx.fillStyle = palette.cloudShade;
+    ctx.beginPath();
+    ctx.ellipse(p.sx, p.sy + r * 0.14, r, r * 0.38, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.sx - r * 0.55, p.sy + r * 0.2, r * 0.6, r * 0.3, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.sx + r * 0.55, p.sy + r * 0.2, r * 0.6, r * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(${hexToRgb(palette.cloudTop).join(',')},0.85)`;
     ctx.beginPath();
     ctx.ellipse(p.sx, p.sy, r, r * 0.38, 0, 0, Math.PI * 2);
     ctx.ellipse(p.sx - r * 0.55, p.sy + r * 0.08, r * 0.6, r * 0.3, 0, 0, Math.PI * 2);
@@ -256,23 +380,28 @@ function drawWorld(ctx, sim, time) {
     ctx.fill();
   }
 
-  // Trees on the valleys below.
+  // Trees on the valleys below: a trunk and a two-green canopy circle, so
+  // the forests read as forests from the air instead of a scatter of spikes.
   const visibleTrees = [];
   for (const tree of world.trees) {
     const p = proj.project(tree.x, tree.y, tree.z);
     if (!p || p.fwd > 1700 || p.sx < -40 || p.sx > FIELD.width + 40) continue;
-    visibleTrees.push({ ...p, size: tree.size });
+    visibleTrees.push({ ...p, size: tree.size, shade: tree.shade ?? 0.5 });
   }
   visibleTrees.sort((a, b) => b.fwd - a.fwd);
   for (const tree of visibleTrees) {
     const h = tree.size * tree.scale;
     if (h < 1.5) continue;
-    ctx.fillStyle = '#2c4a26';
+    const dark = tree.shade < 0.5;
+    ctx.fillStyle = '#4a3421';
+    ctx.fillRect(tree.sx - Math.max(1, h * 0.06), tree.sy - h * 0.35, Math.max(2, h * 0.12), h * 0.35);
+    ctx.fillStyle = dark ? '#24401f' : '#2f5427';
     ctx.beginPath();
-    ctx.moveTo(tree.sx, tree.sy - h);
-    ctx.lineTo(tree.sx - h * 0.55, tree.sy);
-    ctx.lineTo(tree.sx + h * 0.55, tree.sy);
-    ctx.closePath();
+    ctx.arc(tree.sx, tree.sy - h * 0.55, h * 0.62, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = dark ? '#33582c' : '#406b31';
+    ctx.beginPath();
+    ctx.arc(tree.sx - h * 0.14, tree.sy - h * 0.68, h * 0.4, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -350,6 +479,66 @@ function drawRunway(ctx, sim, proj, time, strip = null) {
       ctx.fill();
     }
   }
+
+  // Threshold chevrons: three white arrows at the near end, pointing the
+  // way in, so the strip's near end reads from far off.
+  for (const off of [-9, 0, 9]) {
+    const t1 = proj.project(runway.x + off - 3.4, runway.ground + 0.2, runway.z0 + 6);
+    const t2 = proj.project(runway.x + off + 3.4, runway.ground + 0.2, runway.z0 + 6);
+    const t3 = proj.project(runway.x + off, runway.ground + 0.2, runway.z0 + 22);
+    if (!t1 || !t2 || !t3) continue;
+    ctx.fillStyle = 'rgba(245, 245, 235, 0.92)';
+    ctx.beginPath();
+    ctx.moveTo(t1.sx, t1.sy);
+    ctx.lineTo(t2.sx, t2.sy);
+    ctx.lineTo(t3.sx, t3.sy);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Runway number painted on the strip, just past the threshold.
+  const num = proj.project(runway.x, runway.ground + 0.25, runway.z0 + 52);
+  if (num && num.fwd < 1800) {
+    ctx.fillStyle = 'rgba(245, 245, 235, 0.9)';
+    ctx.font = `800 ${Math.max(9, Math.min(58, 6 * num.scale))}px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('09', num.sx, num.sy);
+  }
+
+  // PAPI: two white, two red boxes beside the threshold, the visual
+  // glide-slope cue every pilot looks for on final.
+  for (let i = 0; i < 4; i += 1) {
+    const px = runway.x + half + 7 + i * 5;
+    const p = proj.project(px, runway.ground + 0.8, runway.z0 + 42);
+    if (!p || p.fwd > 2000) continue;
+    const s = Math.max(2, Math.min(9, 1.6 * p.scale));
+    ctx.fillStyle = i < 2 ? 'rgba(255,255,255,0.95)' : 'rgba(255,70,60,0.95)';
+    ctx.fillRect(p.sx - s / 2, p.sy - s / 2, s, s);
+  }
+
+  // Approach lights: a sequenced bar of white dots leading to the
+  // threshold, one flashing in turn, so the strip is visible from afar.
+  const flashIndex = Math.floor(time * 2) % 9;
+  for (let i = 0; i < 9; i += 1) {
+    const z = runway.z0 - 22 - i * 22;
+    const a = proj.project(runway.x, runway.ground + 0.6, z);
+    if (!a || a.fwd > 2600) continue;
+    const flashing = i === flashIndex;
+    const r = Math.max(1, Math.min(flashing ? 9 : 5, (flashing ? 2.2 : 1.1) * a.scale));
+    if (flashing) {
+      const glow = ctx.createRadialGradient(a.sx, a.sy, 1, a.sx, a.sy, r * 3);
+      glow.addColorStop(0, 'rgba(255,255,255,0.8)');
+      glow.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(a.sx, a.sy, r * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.beginPath();
+    ctx.arc(a.sx, a.sy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 /** The ring course: the next ring glows gold and pulses; passed rings green. */
@@ -395,11 +584,37 @@ function drawRings(ctx, sim, proj, time) {
     ctx.ellipse(p.sx, p.sy, rx, radius, 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.globalAlpha = 1;
+    // The next ring gets a soft halo, so it pulls the eye from far away.
+    if (index === plane.ringsPassed) {
+      const halo = ctx.createRadialGradient(p.sx, p.sy, radius * 0.4, p.sx, p.sy, radius * 1.9);
+      halo.addColorStop(0, 'rgba(255, 211, 77, 0.16)');
+      halo.addColorStop(1, 'rgba(255, 211, 77, 0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(p.sx, p.sy, radius * 1.9, 0, Math.PI * 2);
+      ctx.fill();
+      // A faint beam from the ring down to the ground, so its height over
+      // the terrain reads at a glance.
+      const ground = proj.project(ring.x, groundUnder(world, ring.x, ring.z) + 0.5, ring.z);
+      if (ground) {
+        ctx.strokeStyle = 'rgba(255, 211, 77, 0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(p.sx, p.sy + radius);
+        ctx.lineTo(ground.sx, ground.sy);
+        ctx.stroke();
+      }
+    }
     if (index === plane.ringsPassed && p.fwd < 900) {
-      ctx.fillStyle = '#ffffff';
+      const label = `${Math.round(p.fwd)}m`;
       ctx.font = `600 ${Math.max(11, Math.min(18, radius * 0.28))}px ${FONT}`;
+      const w = ctx.measureText(label).width + 18;
+      ctx.fillStyle = 'rgba(8, 12, 18, 0.6)';
+      roundRect(ctx, p.sx - w / 2, p.sy - radius - 30, w, 22, 11);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'center';
-      ctx.fillText(`${Math.round(p.fwd)}m`, p.sx, p.sy - radius - 10);
+      ctx.fillText(label, p.sx, p.sy - radius - 14);
     }
   }
 }
@@ -412,6 +627,32 @@ function drawPlane(ctx, plane, time) {
   ctx.save();
   ctx.translate(px, py);
   ctx.rotate(plane.bank);
+  // Contrails streaming off the wingtips: longer and brighter at speed, so
+  // the chase view feels fast.
+  const trailLen = 60 + (plane.speed / PLANE.maxSpeed) * 130;
+  for (const side of [-1, 1]) {
+    const grad = ctx.createLinearGradient(side * 112, 8, side * (112 + 26), 8 + trailLen);
+    grad.addColorStop(0, 'rgba(255,255,255,0.5)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(side * 112 - 3, 8);
+    ctx.lineTo(side * 112 + 3, 8);
+    ctx.lineTo(side * (112 + 26) + 7, 8 + trailLen);
+    ctx.lineTo(side * (112 + 26) - 7, 8 + trailLen);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Engine glow at the tail when the throttle is up.
+  if (plane.throttle > 0.4) {
+    const glow = ctx.createRadialGradient(0, 46, 1, 0, 46, 16);
+    glow.addColorStop(0, `rgba(255, 180, 90, ${0.55 * plane.throttle})`);
+    glow.addColorStop(1, 'rgba(255, 180, 90, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 46, 16, 0, Math.PI * 2);
+    ctx.fill();
+  }
   // Wings: broad, a shallow V of dihedral, red tips, panel lines.
   ctx.fillStyle = '#dfe6ec';
   ctx.strokeStyle = '#5a6672';
@@ -466,6 +707,10 @@ function drawPlane(ctx, plane, time) {
   ctx.stroke();
   ctx.fillStyle = '#c23b2e';
   ctx.fillRect(-8, -6, 16, 4);
+  // Gold cheatline along the fuselage, and the tail number on the fin.
+  ctx.fillStyle = '#e8b64a';
+  ctx.fillRect(-8.5, 2, 2.2, 26);
+  ctx.fillRect(6.3, 2, 2.2, 26);
   ctx.fillStyle = '#274b63';
   ctx.beginPath();
   ctx.ellipse(0, -28, 6, 10, 0, 0, Math.PI * 2);
@@ -482,6 +727,10 @@ function drawPlane(ctx, plane, time) {
   ctx.lineTo(4, 30);
   ctx.closePath();
   ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '800 11px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('07', 0, 46);
   ctx.fillStyle = '#dfe6ec';
   ctx.strokeStyle = '#5a6672';
   ctx.beginPath();
@@ -523,9 +772,9 @@ function drawHud(ctx, sim, time) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
 
-  // Top-left instrument block: speed, altitude, vertical speed, throttle.
+  // Top-left instrument block: speed, altitude, vertical speed, heading.
   ctx.fillStyle = 'rgba(8, 12, 18, 0.55)';
-  roundRect(ctx, 14, 14, 208, 108, 10);
+  roundRect(ctx, 14, 14, 208, 132, 10);
   ctx.fill();
   ctx.fillStyle = '#eef1f5';
   ctx.font = `700 26px ${FONT}`;
@@ -540,11 +789,11 @@ function drawHud(ctx, sim, time) {
   ctx.fillStyle = '#b8c2cc';
   ctx.fillText('ALTITUDE', 128, 66);
   ctx.fillStyle = vsFpm >= 0 ? '#8fd6a0' : '#f2a35e';
-  ctx.font = `600 17px ${FONT}`;
+  ctx.font = `600 16px ${FONT}`;
   ctx.fillText(`${vsFpm >= 0 ? '+' : ''}${vsFpm} ft/min`, 28, 96);
   ctx.fillStyle = '#b8c2cc';
   ctx.font = `600 13px ${FONT}`;
-  ctx.fillText(`HDG ${String(Math.round(headingDeg)).padStart(3, '0')}°`, 128, 96);
+  ctx.fillText(`HDG ${String(Math.round(headingDeg)).padStart(3, '0')}°`, 28, 120);
 
   // Top-centre compass tape.
   const tapeW = 380;
@@ -670,6 +919,27 @@ function drawHud(ctx, sim, time) {
   ctx.lineTo(ahX, ahY + 5);
   ctx.closePath();
   ctx.fill();
+
+  // Speed lines at high speed: faint streaks near the screen edges, so
+  // fast flight feels fast.
+  if (plane.speed > 90 && plane.status === FLYING) {
+    const strength = Math.min(1, (plane.speed - 90) / 60);
+    ctx.save();
+    ctx.globalAlpha = 0.22 * strength;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 9; i += 1) {
+      const side = i % 2 === 0 ? 0 : 1;
+      const y = 120 + hash2(i, Math.floor(time * 6)) * (FIELD.height - 260);
+      const x0 = side === 0 ? 4 : FIELD.width - 4;
+      const len = 34 + hash2(i, Math.floor(time * 6) + 3) * 46;
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(side === 0 ? x0 + len : x0 - len, y + (hash2(i, 5) - 0.5) * 14);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   // Centre message.
   if (plane.messageTimer > 0 && plane.message) {

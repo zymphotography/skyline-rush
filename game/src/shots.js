@@ -84,6 +84,9 @@ function approachTarget(plane, world, ap) {
   return { x: runway.x, y: Math.max(slopeY, ap.floorY), z: plane.z + 500, goAround: false };
 }
 
+export { autopilot, createAutopilotState, approachTarget, flyForward };
+export { angleDifference };
+
 /** Run the simulation forward until the plane lands, crashes, or time runs out. */
 function flyForward(plane, world, seconds, targetFn) {
   const steps = Math.floor(seconds / SAMPLE);
@@ -96,10 +99,11 @@ function flyForward(plane, world, seconds, targetFn) {
 
 /**
  * Set `sim` to the named scene (start, play, land or end; any other name is
- * start) and return the screen to draw over it.
+ * start) in the given mission (0 Dawn, 1 Canyon, 2 Dusk; default Dawn) and
+ * return the screen to draw over it.
  */
-export function stageShot(name, sim) {
-  const mission = MISSIONS[0];
+export function stageShot(name, sim, missionIndex = 0) {
+  const mission = MISSIONS[Math.max(0, Math.min(MISSIONS.length - 1, missionIndex))];
   const world = buildWorld(mission);
   const plane = createPlane(world);
   sim.world = world;

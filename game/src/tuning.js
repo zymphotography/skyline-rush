@@ -43,21 +43,27 @@ const DAWN = {
   skyTop: '#2e4a7a', skyMid: '#7fa3c8', horizon: '#f6c98a',
   sun: '#ffd9a0', sunGlow: 'rgba(255, 205, 140, 0.55)',
   groundLow: '#4e7a3d', groundMid: '#6d8f43', groundHigh: '#8a7a52',
-  snow: '#e9eef2', haze: '#d9c39a', river: '#5f9cc4',
+  snow: '#e9eef2', haze: '#d9c39a', river: '#5f9cc4', lake: '#4a8fc0',
+  fieldA: '#b59a5e', fieldB: '#456f38', fieldC: '#8a6a45', fieldD: '#86a355',
+  cloudShade: 'rgba(178, 196, 218, 0.75)', cloudTop: '#ffffff', stars: 0,
   ring: '#ffd34d', ringDim: '#7fa8d8', runway: '#3c4148',
 };
 const CANYON = {
   skyTop: '#274b63', skyMid: '#6f9db4', horizon: '#f2b06e',
   sun: '#ffe3b0', sunGlow: 'rgba(255, 214, 150, 0.5)',
   groundLow: '#9a6b43', groundMid: '#b07845', groundHigh: '#7d5a40',
-  snow: '#e5d9c5', haze: '#e0b98a', river: '#4e8fb8',
+  snow: '#e5d9c5', haze: '#e0b98a', river: '#4e8fb8', lake: '#3f7fae',
+  fieldA: '#a87c4a', fieldB: '#7d5a38', fieldC: '#96683f', fieldD: '#8a7a52',
+  cloudShade: 'rgba(190, 180, 165, 0.75)', cloudTop: '#fff6e6', stars: 0,
   ring: '#ffb347', ringDim: '#7fa8d8', runway: '#3c4148',
 };
 const DUSK = {
   skyTop: '#1d2340', skyMid: '#5a4a7a', horizon: '#e07a4e',
   sun: '#ff9a5c', sunGlow: 'rgba(255, 140, 90, 0.5)',
   groundLow: '#3d4a35', groundMid: '#55603f', groundHigh: '#6e6250',
-  snow: '#d8d2e0', haze: '#c98a72', river: '#4a6f96',
+  snow: '#d8d2e0', haze: '#c98a72', river: '#4a6f96', lake: '#3a5f8a',
+  fieldA: '#6b5a48', fieldB: '#4a5240', fieldC: '#5d4a3a', fieldD: '#5f6a4a',
+  cloudShade: 'rgba(120, 100, 140, 0.8)', cloudTop: '#ffcfb0', stars: 0.9,
   ring: '#ff8a5c', ringDim: '#8fa8d8', runway: '#33373f',
 };
 
