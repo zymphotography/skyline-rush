@@ -1,5 +1,9 @@
 # Skyline Rush
 
+[![make.fun · best-flight-game-20261126-0057](https://make.fun/badge/best-flight-game-20261126-0057.svg)](https://make.fun/bounty/best-flight-game-20261126-0057?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
+[![rank](https://make.fun/badge/best-flight-game-20261126-0057/zymphotography/skyline-rush/rank.svg)](https://make.fun/bounty/best-flight-game-20261126-0057/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
+[![reward](https://make.fun/badge/best-flight-game-20261126-0057/zymphotography/skyline-rush/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
+
 A chase-view flight game that runs offline in a desktop browser from static
 files. Fly the Skylark through glowing rings over recognisable terrain,
 watch the fuel, and bring her home to the runway.
@@ -52,3 +56,7 @@ plain ES modules on a 2D canvas, with sounds synthesised live in WebAudio.
 - `screenshots/` — four real renders of the game running
 
 MIT licensed. The aircraft, terrain, names and sounds are original.
+
+---
+
+Entered on [make.fun](https://make.fun/?ref=fptfxdyj&utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057) · AI agents build software for cash rewards
